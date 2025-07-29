@@ -432,7 +432,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         
         all_axes = [0, 1, 2, 3]
         try:
-            speed = float(self.ffi_speed_input.text())
+            speed = float(self.cm_speed_input.text())
             for axis in all_axes:
                 self.axes_data[axis]['axis_obj'].enable()
                 self.axes_data[axis]["state"] = True
@@ -460,7 +460,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
 
         self.cm_worker = CircularMotionWorker(self.stand, nano, speed, radius, rotation, angle)
         self.cm_worker.log_ready.connect(self.handle_cm_log)
-        self.cm_worker.error.connect(lambda msg: self.show_error(f"CM ошибка: {msg}"))
+        self.cm_worker.error_signal.connect(lambda msg: self.show_error(f"CM ошибка: {msg}"))
         self.cm_worker.progress_signal.connect(self.print_from_workers)
         self.cm_worker.start()
         self.start_position_updates()
@@ -470,24 +470,42 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
     @pyqtSlot(dict)
     def handle_cm_log(self, log):
         self.cm_motion_log = log
-        # fig = calc.firstFieldIntegral(log, self.ffi_worker.mode, self.ffi_worker.speed)
+        fig1, fig2 = calc.harmonicAnalysis(log)
 
-        # try:
-        #     buf = io.BytesIO()
-        #     fig.savefig(buf, format='png', dpi=300, bbox_inches='tight')
-        #     buf.seek(0)
-        #     pixmap = QtGui.QPixmap()
-        #     pixmap.loadFromData(buf.getvalue())
-        #     buf.close()
-        #     plt.close(fig)
+        try:
+            buf = io.BytesIO()
+            fig1.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+            buf.seek(0)
+            pixmap = QtGui.QPixmap()
+            pixmap.loadFromData(buf.getvalue())
+            buf.close()
+            plt.close(fig1)
 
-        #     self.plot_pic.setPixmap(pixmap)
-        #     self.plot_pic.setScaledContents(True)
-        #     self.dual_print("График отображён в QLabel")
-        # except Exception as e:
-        #     self.show_error(f"Ошибка отображения графика: {e}")
-        #     if fig:
-        #         plt.close(fig)
+            self.plot_pic.setPixmap(pixmap)
+            self.plot_pic.setScaledContents(True)
+            self.dual_print("График отображён в QLabel")
+        except Exception as e:
+            self.show_error(f"Ошибка отображения графика: {e}")
+            if fig1:
+                plt.close(fig1)
+
+
+        try:
+            buf1 = io.BytesIO()
+            fig2.savefig(buf1, format='png', dpi=300, bbox_inches='tight')
+            buf1.seek(0)
+            pixmap2 = QtGui.QPixmap()
+            pixmap2.loadFromData(buf1.getvalue())
+            buf1.close()
+            plt.close(fig2)
+
+            self.plot_pic_2.setPixmap(pixmap2)
+            self.plot_pic_2.setScaledContents(True)
+            self.dual_print("График отображён в QLabel")
+        except Exception as e:
+            self.show_error(f"Ошибка отображения графика: {e}")
+            if fig2:
+                plt.close(fig2)
 
 
     def start_ffi_motion(self):
@@ -679,7 +697,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
 
         if selected_mode == "По окружности":
             # self.start_circular_motion()
-            self.simpleTest()
+            self.startCircularMotionWBuffer()
         elif selected_mode == "Первый магнитный интеграл":
             self.start_ffi_motion()
         elif selected_mode == "Второй магнитный интеграл":  #Todo добавить возврат в ноль мб

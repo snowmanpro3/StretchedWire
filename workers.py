@@ -252,8 +252,8 @@ class CircularMotionWorker(QThread):
         try:
             program_1 = f"""
             MSEG (0,1),{-self.radius},{0} 
-            ARC1 (0,1), {0},{0},{self.radius},{0},{'+'} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
-            ARC1 (0,1), {0},{0},{-self.radius},{0},{'+'}
+            ARC1 (0,1), {0},{0},{self.radius},{0},{self.rotation} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
+            ARC1 (0,1), {0},{0},{-self.radius},{0},{self.rotation}
             ENDS (0,1)
             SPLITALL
             STOP

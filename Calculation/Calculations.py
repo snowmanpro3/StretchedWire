@@ -11,7 +11,7 @@ import chardet
 def firstFieldIntegral(log: dict, mode: str, vel: float):
     current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     str_current_time = str(current_time)
-    save_path_csv = f"Logs\\FFI\\FFIlog_{str_current_time}.csv"  # Путь сохранения в папку FFItest
+    save_path_csv = f"Logs\\FFI\\FFIlog_{str_current_time}.csv"  # Путь сохранения в папку FFI
     
     df = pd.DataFrame(log)
     if mode == 'X':
@@ -48,7 +48,7 @@ def secondFieldIntegral(log: dict, mode : str, vel: float):
     L = 2 # Длина нити
     current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     str_current_time = str(current_time)
-    save_path_csv = f"Logs\\SFI\\SFIlog_{str_current_time}.csv"  # Путь сохранения в папку FFItest
+    save_path_csv = f"Logs\\SFI\\SFIlog_{str_current_time}.csv"  # Путь сохранения в папку SFI
     
     df = pd.DataFrame(log)
     if mode == 'X':
@@ -85,9 +85,24 @@ def secondFieldIntegral(log: dict, mode : str, vel: float):
     
     return fig
 
-def harmonicAnalysis(X1, X2, Y1, Y2, time, eds, save_path=None):
-    vel = []
-    vel = (X2 - X1) / time
+def harmonicAnalysis(log: dict):
+    L = 2 # Длина нити
+    current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    str_current_time = str(current_time)
+    save_path_csv = f"Logs\\CM\\CMlog_{str_current_time}.csv"  # Путь сохранения в папку CM
+    
+    df = pd.DataFrame(log)
+    pos_X = df['x_pos']
+    pos_Y = df['y_pos']
+    df.index.name = 'Index'  # Присваю имя index индексам (создаются автоматически, можно даже отключить)
+    df.to_csv(save_path_csv, sep = ',')
+
+    pos_X_previous = pos_X.to_numpy()[:-1]
+    pos_Y_previous = pos_Y.to_numpy()[:-1]
+    time = np.array(df['time'])[1:]
+    pos_X_current = pos_X.to_numpy()[1:]
+    pos_Y_current = pos_Y.to_numpy()[1:]
+    eds = np.array(df['eds'])[1:]
 
     # Убираем DC-компоненту (вычитаем среднее значение)
     eds -= np.mean(eds)
@@ -112,19 +127,28 @@ def harmonicAnalysis(X1, X2, Y1, Y2, time, eds, save_path=None):
     for i, amp in enumerate(amplitudes[:10]):  # Перебираем первые 10 гармоник
         print(f"Гармоника {i}: амплитуда = {amp:.3e}")  # Форматируем с одной цифрой после запятой
 
+    fig1, ax = plt.subplots()
 
-
-    fig, ax = plt.subplots()
+    save_path = f"Logs\\CM\\CMgraph_{str_current_time}.png"
     
     # Строим график зависимости первого магнитного поля от координаты нити (X1, например)
     ax.plot(freqs[:N // 2], amplitudes)
-    ax.xlabel('Круговая частота (рад/с)')
-    ax.ylabel('Амплитуда')
-    ax.title('Мультипольное разложение ЭДС (логарифмическая шкала)')
+    ax.set_xlabel('Круговая частота (рад/с)')
+    ax.set_ylabel('Амплитуда')
+    ax.set_title('Мультипольное разложение ЭДС (логарифмическая шкала)')
     ax.grid(which="both", linestyle="--")  # Сетка для удобства
 
     if save_path:
-            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            fig1.savefig(save_path, dpi=300, bbox_inches='tight')
             print(f"График сохранён как {save_path}")
     
-    return fig
+    
+    fig2, ax2 = plt.subplots()
+    ax2.plot(pos_X, pos_Y)
+    ax2.set_xlabel('X, мм')
+    ax2.set_ylabel('Y, мм')
+    ax2.set_title('Должна быть окружность')
+    ax2.grid(which="both", linestyle="--")  # Сетка для удобства
+
+
+    return fig1, fig2
