@@ -132,15 +132,19 @@ def harmonicAnalysis(log: dict):
     save_path = f"Logs\\CM\\CMgraph_{str_current_time}.png"
     
     # Строим график зависимости первого магнитного поля от координаты нити (X1, например)
-    ax.plot(freqs[:N // 2], amplitudes)
+    ax.stem(freqs[:N // 2], amplitudes, 
+        linefmt='-',      # стиль вертикальных линий
+        markerfmt='o',    # стиль маркеров (кружки)
+        basefmt='-')      # стиль базовой линии (ось X)
+
     ax.set_xlabel('Круговая частота (рад/с)')
     ax.set_ylabel('Амплитуда')
-    ax.set_title('Мультипольное разложение ЭДС (логарифмическая шкала)')
-    ax.grid(which="both", linestyle="--")  # Сетка для удобства
+    ax.set_title('Мультипольное разложение ЭДС')
+    ax.grid(which="both", linestyle="--")
 
     if save_path:
-            fig1.savefig(save_path, dpi=300, bbox_inches='tight')
-            print(f"График сохранён как {save_path}")
+        fig1.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"График сохранён как {save_path}")
     
     
     fig2, ax2 = plt.subplots()

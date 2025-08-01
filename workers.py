@@ -251,9 +251,9 @@ class CircularMotionWorker(QThread):
 
         try:
             program_1 = f"""
-            MSEG (0,1),{-self.radius},{0} 
-            ARC1 (0,1), {0},{0},{self.radius},{0},{self.rotation} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
-            ARC1 (0,1), {0},{0},{-self.radius},{0},{self.rotation}
+            MSEG (0,1),{0},{-self.radius} 
+            ARC1 (0,1), {0},{0},{0},{self.radius},{self.rotation} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
+            ARC1 (0,1), {0},{0},{0},{-self.radius},{self.rotation}
             ENDS (0,1)
             SPLITALL
             STOP
@@ -297,6 +297,16 @@ class CircularMotionWorker(QThread):
             self.log_ready.emit(log)
         except Exception as e:
             self.error.emit(str(e))
+
+        try:
+            acsc.toPoint(self.stand.hc, acsc.AMF_RELATIVE, 1, self.radius, acsc.SYNCHRONOUS)
+            acsc.waitMotionEnd(self.stand.hc, 1, 20000)
+        except Exception as e:
+            self.progress_signal.emit(f"Ошибка при возвращении нити в центр (acsc.toPoint): {e}")
+            print(f"Ошибка при возвращении нити в центр (toPoint): {e}")
+        else:
+            self.progress_signal.emit(f"Функция acsc.toPoint выполнена без ошибок, нить возвращена в центр")
+            print(f"Функция acsc.toPoint выполнена без ошибок, нить возвращена в центр")
 
 
 class FindMagneticAxisWorker_PREVIOUS(QThread):
