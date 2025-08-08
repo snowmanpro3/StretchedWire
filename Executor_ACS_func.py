@@ -281,7 +281,10 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         if not self.stand:
             # self.show_error("Контроллер не подключён!")
             return
-
+        
+        if text == "" or text == "-":
+            return  # Пропускаем проверку, пока ввод не завершен
+        
         data = self.axes_data[axis]
         try:
             distance = float(text)
@@ -437,6 +440,9 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
                 self.axes_data[axis]['axis_obj'].enable()
                 self.axes_data[axis]["state"] = True
                 self.axes_data[axis]['axis_obj'].set_speed(speed)
+                if axis not in self.selected_axes:
+                    self.selected_axes.append(axis)
+                    self.selected_axes = sorted(self.selected_axes)
             self.dual_print(f"Оси {all_axes} включены.")
             self.dual_print(f"Скорость {self.speed} мм/с установлена для осей {all_axes}.")
         except Exception as e:
@@ -447,6 +453,8 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             radius = float(self.cm_radius_input.text())
             rotation = str(self.cm_rotation_input.text())
             angle = float(self.cm_angle_input.text())
+            N = int(self.cm_number_of_rounds_input.text())
+            self.dual_print(f"N: {N}, тип: {type(N)}")
         except Exception as e:
             self.dual_print(f"Ошибка чтения параметров кругового движения: {e}")
 
@@ -458,7 +466,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             self.dual_print("Успешное подключение к Keithley")
 
 
-        self.cm_worker = CircularMotionWorker(self.stand, nano, speed, radius, rotation, angle)
+        self.cm_worker = CircularMotionWorker(self.stand, nano, speed, radius, rotation, N, angle)
         self.cm_worker.log_ready.connect(self.handle_cm_log)
         self.cm_worker.error_signal.connect(lambda msg: self.show_error(f"CM ошибка: {msg}"))
         self.cm_worker.progress_signal.connect(self.print_from_workers)

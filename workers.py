@@ -200,19 +200,21 @@ class CircularMotionWorker(QThread):
     log_ready = pyqtSignal(dict)
     pos_new = pyqtSignal(float)
 
-    def __init__(self, stand, keithley, speed, radius, rotation, angle):
+    def __init__(self, stand, keithley, speed, radius, rotation, N, angle):
         super().__init__()
         self.stand = stand
         self.keithley = keithley
         self.speed = speed
         self.radius = radius
         self.rotation = rotation
+        self.N = N #!!! Количество оборотов. Учесть в задании сегментов
         self.angle = angle
         self.running = True
         self.masters = [0, 1]
         self.all_axes = [0, 1, 2, 3]
 
     def run(self):
+        print(f"N: {self.N}, тип: {type(self.N)}")
         #* ПРЕДПОЛАГАЕТСЯ ЧТО НИТЬ НАХОДИТСЯ В ЦЕНТРЕ, Т.Е. НА МАГНИТНОЙ ОСИ
         try:
             #! Создаём две пары мастер слейв. Далее управляем только осями 0 и 1. 2 и 3 отражают их движение"
@@ -252,6 +254,21 @@ class CircularMotionWorker(QThread):
         try:
             program_1 = f"""
             MSEG (0,1),{0},{-self.radius} 
+            """
+
+
+            acsc.cleanBuffer(self.stand.hc, 1)
+            acsc.loadBuffer(self.stand.hc, 1, program_1)
+
+            program_2 = f"""
+            ARC1 (0,1), {0},{0},{0},{self.radius},{self.rotation} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
+            ARC1 (0,1), {0},{0},{0},{-self.radius},{self.rotation}
+            """
+            
+            for _ in range(self.N - 1):
+                acsc.appendBuffer(self.stand.hc, 1, program_2)
+
+            program_3 = f"""
             ARC1 (0,1), {0},{0},{0},{self.radius},{self.rotation} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
             ARC1 (0,1), {0},{0},{0},{-self.radius},{self.rotation}
             ENDS (0,1)
@@ -259,8 +276,7 @@ class CircularMotionWorker(QThread):
             STOP
             """
 
-            acsc.cleanBuffer(self.stand.hc, 1)
-            acsc.loadBuffer(self.stand.hc, 1, program_1)
+            acsc.appendBuffer(self.stand.hc, 1, program_3)
             acsc.compileBuffer(self.stand.hc, 1)
             acsc.runBuffer(self.stand.hc, 1)
 

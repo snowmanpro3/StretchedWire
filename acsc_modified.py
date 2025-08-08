@@ -240,6 +240,12 @@ def cleanBuffer(hcomm, buffno, startLine=0, endLine=1000, wait=SYNCHRONOUS):
 def compileBuffer(hcomm, buffno, wait=SYNCHRONOUS):
     acs.acsc_CompileBuffer(hcomm, int32(buffno), wait)
 
+def appendBuffer(hcomm, buffnumber, program, count=512, wait=SYNCHRONOUS):
+    """Append one or several strings to a buffer into the ACS controller."""
+    prgbuff = ctypes.create_string_buffer(str(program).encode(), count)
+    rv = acs. acsc_AppendBuffer(hcomm, buffnumber, byref(prgbuff), count, wait)
+    errorHandling(rv)
+
 def runBuffer(hcomm, buffno, label=None, wait=SYNCHRONOUS): #Запускает буфер (программу) на контроллере
     """Runs a buffer in the controller."""
     if label is not None:
