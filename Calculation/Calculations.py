@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import cmath
 from scipy.integrate import cumulative_trapezoid # Для интегрирования методом трапеций
 from scipy.fft import fft, fftfreq
 from scipy.signal import get_window  # Добавляем оконную функцию
@@ -85,74 +86,218 @@ def secondFieldIntegral(log: dict, mode : str, vel: float):
     
     return fig
 
-def harmonicAnalysis(log: dict):
-    L = 2 # Длина нити
+def fft(x):
+    N = len(x)
+    if N == 1:
+        return x
+    if N % 2 != 0:
+        raise ValueError("Длина массива должна быть степенью двойки")
+    
+    even = fft(x[0::2])
+    odd = fft(x[1::2])
+    
+    twiddle_factors = [cmath.exp(-2j * cmath.pi * k / N) * odd[k] for k in range(N // 2)]
+    
+    result = [even[k] + twiddle_factors[k] for k in range(N // 2)] + \
+            [even[k] - twiddle_factors[k] for k in range(N // 2)]
+    
+    return result
+
+def harmonicAnalysis(log: dict, M: int = 1):
     current_time = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     str_current_time = str(current_time)
     save_path_csv = f"Logs\\CM\\CMlog_{str_current_time}.csv"  # Путь сохранения в папку CM
-    
+
+
     df = pd.DataFrame(log)
-    pos_X = df['x_pos']
-    pos_Y = df['y_pos']
     df.index.name = 'Index'  # Присваю имя index индексам (создаются автоматически, можно даже отключить)
     df.to_csv(save_path_csv, sep = ',')
-
-    pos_X_previous = pos_X.to_numpy()[:-1]
-    pos_Y_previous = pos_Y.to_numpy()[:-1]
-    time = np.array(df['time'])[1:]
-    pos_X_current = pos_X.to_numpy()[1:]
-    pos_Y_current = pos_Y.to_numpy()[1:]
-    eds = np.array(df['eds'])[1:]
-
-    # Убираем DC-компоненту (вычитаем среднее значение)
-    eds -= np.mean(eds)
-
-    # Применяем оконную функцию Ханна
-    window = get_window("hann", len(eds))  # Создаем окно Ханна
-    eds *= window  # Применяем окно к сигналу
-
-    # Выполняем преобразование Фурье
-    N = len(time)  # Количество точек во временном ряду
-    fft_values = fft(eds)  # Преобразование Фурье для ЭДС
-    freqs = np.fft.fftfreq(N, d=(time[1] - time[0])) * 2 * np.pi  # Преобразуем в круговую частоту
-
-    # Вычисление амплитуд гармоник
-    amplitudes = 2.0 / N * np.abs(fft_values[:N // 2])  # Вычисление модуля спектра
-
-    # Отбрасываем слишком малые амплитуды (шум)
-    threshold = 1e-10  # Порог отсечения
-    amplitudes[amplitudes < threshold] = np.nan  # Меняем малые значения на NaN, чтобы они не отображались
-
-    # Вывод коэффициентов мультипольного разложения
-    for i, amp in enumerate(amplitudes[:10]):  # Перебираем первые 10 гармоник
-        print(f"Гармоника {i}: амплитуда = {amp:.3e}")  # Форматируем с одной цифрой после запятой
-
-    fig1, ax = plt.subplots()
-
-    save_path = f"Logs\\CM\\CMgraph_{str_current_time}.png"
+    # Используем `arctan2` для получения угла в диапазоне [-π, π]
+    df["theta"] = np.arctan2(df["y_pos"], df["x_pos"])
     
-    # Строим график зависимости первого магнитного поля от координаты нити (X1, например)
-    ax.stem(freqs[:N // 2], amplitudes, 
-        linefmt='-',      # стиль вертикальных линий
-        markerfmt='o',    # стиль маркеров (кружки)
-        basefmt='-')      # стиль базовой линии (ось X)
+    # Расчет непрерывного, монотонно возрастающего угла (unwrapping)
+    # Движение по часовой стрелке, поэтому `theta` убывает от π к -π.
+    # `-df.theta` делает его возрастающим.
+    d_theta = np.diff(-df.theta, prepend=-df.theta[0])
+    d_theta[d_theta > np.pi] -= 2 * np.pi
+    d_theta[d_theta < -np.pi] += 2 * np.pi  #! Убираем пики при переходе на n-й поворот
+    theta_accum = np.cumsum(d_theta) #! СОздаём список с постоянно возрастающим углом(например, если 3 оборотоа до до 6Пи)
+    theta_accum -= theta_accum[0] #! Начинается с угла равного 0
+    df["theta_accum"] = theta_accum
 
-    ax.set_xlabel('Круговая частота (рад/с)')
-    ax.set_ylabel('Амплитуда')
-    ax.set_title('Мультипольное разложение ЭДС')
-    ax.grid(which="both", linestyle="--")
+    # Разделение на обороты по минимуму X координаты
+    revolution_boundaries = [0]
+    for i in range(1, len(df) - 1):
+        if df["x_pos"][i] < df["x_pos"][i-1] and df["x_pos"][i] < df["x_pos"][i+1]:
+            revolution_boundaries.append(i)
+    revolution_boundaries.append(len(df))
 
-    if save_path:
-        fig1.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"График сохранён как {save_path}")
-    
-    
+    print(f"Найдено {len(revolution_boundaries) - 1} оборота(ов).")
+    print("Индексы границ оборотов:", revolution_boundaries)
+
+    # Интерполяция на равномерную угловую сетку
+    interpolated_data = []
+    all_amplitudes = []  #! Для усреднения по FFT
+    n_points_per_rev = 256  #! Степень двойка для удобного FFT
+    phi_target = np.linspace(0, 2 * np.pi, n_points_per_rev, endpoint=False)
+
+    for j in range(len(revolution_boundaries) - 1):
+        start_idx = revolution_boundaries[j]
+        end_idx = revolution_boundaries[j+1]  #! Определение границ оборотов для дальнейшего анализа каждого оборота по отдельности
+        
+        if end_idx - start_idx < n_points_per_rev / 4: #????? если осталось меньше четверти оборота, то скип
+            continue
+
+        signal_j = df["eds"].iloc[start_idx:end_idx].values
+        phi_j_abs = df["theta_accum"].iloc[start_idx:end_idx].values
+        
+        phi_for_interp = phi_j_abs - phi_j_abs[0]  #! Сдвигаем начало угла к нулю
+
+        # Добавляем точку в конце для корректной циклической интерполяции
+        phi_j_ext = np.append(phi_for_interp, phi_for_interp[-1] + (phi_for_interp[1]-phi_for_interp[0]) )
+        signal_j_ext = np.append(signal_j, signal_j[0])
+
+        # Интерполяция
+        f_signal = np.interp(phi_target, phi_j_ext, signal_j_ext)
+        
+        interpolated_data.append({'signal': f_signal})
+
+    if not interpolated_data:
+        print("Не удалось выделить ни одного полного оборота для анализа.")
+        return
+
+    # --- ШАГ 3: УСРЕДНЕНИЕ СИГНАЛОВ ---
+    print(f"\nУсреднение {len(interpolated_data)} оборотов...")
+    all_signals_matrix = np.array([d['signal'] for d in interpolated_data])
+
+    N = n_points_per_rev
+
+    if M == 1:
+        averaged_signal = np.mean(all_signals_matrix, axis=0)
+
+        # --- ШАГ 4: БПФ И ГАРМОНИЧЕСКИЙ АНАЛИЗ ---
+        print("Выполнение БПФ для усредненного сигнала...")
+        fft_result = fft(averaged_signal.tolist()) 
+        
+        amplitudes = 2.0/N * np.abs(fft_result[0:N//2])
+        amplitudes[0] = amplitudes[0] / 2.0
+
+        # Вывод коэффициентов мультипольного разложения
+        for i, amp in enumerate(amplitudes[:10]): # Перебираем первые 10 гармоник
+            print(f"Гармоника {i}: амплитуда = {amp:.3e}") # Форматируем с одной цифрой после запятой
+        
+        save_path = f"Logs\\CM\\CMgraph_{str_current_time}.png"
+        
+        fig_to_save, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(10, 8))
+
+        # Верхний subplot: сигналы + средний
+        for i, signal_data in enumerate(all_signals_matrix):
+            ax_top.plot(phi_target, signal_data, alpha=0.3, label=f"{i}-й оборот")
+        ax_top.plot(phi_target, averaged_signal, 'k-', lw=2, label='Усредненный сигнал')
+        ax_top.set_title('Сигналы со всех оборотов и их среднее')
+        ax_top.set_xlabel('Угол (радианы)')
+        ax_top.set_ylabel('Сигнал EDS')
+        ax_top.grid(True)
+        ax_top.legend()
+
+        # Нижний subplot: гармонический анализ (точки)
+        ax_bottom.stem(range(N//2), amplitudes)
+        ax_bottom.set_title('Гармонический анализ (амплитудный спектр)')
+        ax_bottom.set_xlabel('Номер гармоники')
+        ax_bottom.set_ylabel('Амплитуда')
+        ax_bottom.set_xlim(0, 11)
+        ax_bottom.grid(True)
+
+        fig_to_save.tight_layout()
+
+        # Сохранение
+        if save_path:
+            fig_to_save.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"График сохранён как {save_path}")
+
+        # Для отрисовки в GUI только гармонический анализ
+        fig1, ax1 = plt.subplots()
+        ax1.stem(range(N//2), amplitudes)
+        ax1.set_title('Гармонический анализ (амплитудный спектр)')
+        ax1.set_xlabel('Номер гармоники')
+        ax1.set_ylabel('Амплитуда')
+        ax1.set_xlim(0, 11)
+        ax1.grid(True)
+
+    elif M == 2:
+
+        for j in range(len(revolution_boundaries) - 1):
+            fft_result = fft(interpolated_data[j]['signal'].tolist())
+            amplitudes = 2.0/N * np.abs(fft_result[0:N//2])
+            amplitudes[0] = amplitudes[0] / 2.0
+            all_amplitudes.append(amplitudes)
+        
+        all_amplitudes_matrix = np.array(all_amplitudes)
+        averaged_amplitudes = np.mean(all_amplitudes_matrix, axis=0)
+        std_amplitudes = np.std(all_amplitudes_matrix, axis=0)
+
+        for i, amp in enumerate(amplitudes[:10]): # Перебираем первые 10 гармоник
+            print(f"Гармоника {i}: амплитуда = {amp:.3e}") # Форматируем с одной цифрой после запятой
+        
+        save_path = f"Logs\\CM\\CMgraph_{str_current_time}.png"
+        
+        fig_to_save, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(10, 8))
+
+        # Верхний subplot: сигналы + средний
+        for i, signal_dict in enumerate(interpolated_data):
+            signal_data = signal_dict['signal']  # Извлекаем массив значений
+            ax_top.plot(phi_target, signal_data, alpha=0.6, label=f'Оборот {i+1}')
+        ax_top.set_title('Сигналы со всех оборотов и их среднее')
+        ax_top.set_xlabel('Угол (радианы)')
+        ax_top.set_ylabel('Сигнал EDS')
+        ax_top.grid(True)
+        ax_top.legend()
+
+        # Нижний subplot: гармонический анализ (точки)
+        harmonics = range(N//2)
+        ax_bottom.plot(harmonics, averaged_amplitudes, 'o-', lw=2, label='Средняя амплитуда')
+        ax_bottom.fill_between(harmonics, 
+                     averaged_amplitudes - std_amplitudes, 
+                     averaged_amplitudes + std_amplitudes, 
+                     color='skyblue', alpha=0.5, label='Среднеквадратичное отклонение (СКО)')
+        ax_bottom.set_title('Гармонический анализ (средний спектр и СКО)')
+        ax_bottom.set_xlabel('Номер гармоники')
+        ax_bottom.set_ylabel('Амплитуда')
+        ax_bottom.set_xlim(0, 11)
+        ax_bottom.grid(True)
+        ax_bottom.legend()
+
+        fig_to_save.tight_layout()
+
+        # Сохранение
+        if save_path:
+            fig_to_save.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"График сохранён как {save_path}")
+
+        # Для отрисовки в GUI только гармонический анализ
+        fig1, ax1 = plt.subplots()
+        ax1.plot(harmonics, averaged_amplitudes, 'o-', lw=2, label='Средняя амплитуда')
+        ax1.fill_between(harmonics, 
+                     averaged_amplitudes - std_amplitudes, 
+                     averaged_amplitudes + std_amplitudes, 
+                     color='skyblue', alpha=0.5, label='Среднеквадратичное отклонение (СКО)')
+        ax1.set_title('Гармонический анализ (средний спектр и СКО)')
+        ax1.set_xlabel('Номер гармоники')
+        ax1.set_ylabel('Амплитуда')
+        ax1.set_xlim(0, 11)
+        ax1.grid(True)
+        ax1.legend()
+
+    # Траектория нити
     fig2, ax2 = plt.subplots()
-    ax2.plot(pos_X, pos_Y)
+    ax2.plot(df["x_pos"], df["y_pos"])
     ax2.set_xlabel('X, мм')
     ax2.set_ylabel('Y, мм')
     ax2.set_title('Должна быть окружность')
-    ax2.grid(which="both", linestyle="--")  # Сетка для удобства
-
+    ax2.grid(which="both", linestyle="--")
 
     return fig1, fig2
+
+def first_field_int_with_N(log: dict, mode: str, vel: float):
+     
+     pass

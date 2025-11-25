@@ -84,8 +84,8 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         self.stop_button_test.clicked.connect(self.stop_all_axes)
         self.start_mode_motion_test.clicked.connect(self.check_mode_then_start_test)
         self.tab1.currentChanged.connect(self.currentTab)
-        # self.findMagAxes_button.clicked.connect(self.findMagneticAxis)
         self.findMagAxes_button.clicked.connect(self.start_find_magnetic_axis_worker) # New
+        self.check_mode.currentTextChanged.connect(lambda text: self.enable_or_disable_mode_data(text))
         
 
         for i in range(4):
@@ -166,7 +166,41 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         self.axes_data[1]["axis_obj"].set_pos(0)
         self.axes_data[2]["axis_obj"].set_pos(0)
         self.axes_data[3]["axis_obj"].set_pos(0)
-        pass
+        
+
+    def enable_or_disable_mode_data(self, text):
+        def set_default_windows(self):
+            self.speed_input.setEnabled(True)
+            self.mode_input.setEnabled(True)
+            self.distance_input.setEnabled(True)
+            self.radius_input.setEnabled(True)
+            self.rotation_input.setEnabled(True)
+            self.number_of_rounds_input.setEnabled(True)
+            self.cm_mode.setEnabled(True)
+        if text == "По окружности":
+            set_default_windows(self)
+            self.mode_input.setEnabled(False)
+            self.distance_input.setEnabled(False)
+        elif text == "Первый магнитный интеграл":
+            set_default_windows(self)
+            self.radius_input.setEnabled(False)
+            self.rotation_input.setEnabled(False)
+            self.number_of_rounds_input.setEnabled(False)
+            self.cm_mode.setEnabled(False)
+        elif text == "Второй магнитный интеграл":
+            set_default_windows(self)
+            self.radius_input.setEnabled(False)
+            self.rotation_input.setEnabled(False)
+            self.number_of_rounds_input.setEnabled(False)
+            self.cm_mode.setEnabled(False)
+        elif text == "Нахождение магнитной оси":
+            set_default_windows(self)
+            self.mode_input.setEnabled(False)
+            self.radius_input.setEnabled(False)
+            self.rotation_input.setEnabled(False)
+            self.number_of_rounds_input.setEnabled(False)
+            self.cm_mode.setEnabled(False)
+
 
     def connect_to_controller(self):
         """Подключается к контроллеру. Инициализирует оси как объекты в ключе 'axis_obj """
@@ -349,6 +383,11 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         if not self.stand:
             self.show_error("Контроллер не подключён!")
             return
+        
+        if self.fma_worker and self.fma_worker.isRunning():
+            self.fma_worker.stop() # Сначала останавливаем логику воркера
+        if self.cm_worker and self.cm_worker.isRunning():
+            self.cm_worker.stop()
 
         try:
             acsc.killAll(self.stand.hc, acsc.SYNCHRONOUS)
@@ -434,8 +473,14 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             return
         
         all_axes = [0, 1, 2, 3]
+        selected_mode = self.cm_mode.currentText()
+        self.dual_print(f"Выбран режим гармонического анализа: {selected_mode}")
+        if selected_mode == "Усреднение по сигналам":
+            self.M = 1
+        elif selected_mode == "Усреднение по преобразованию БПФ":
+            self.M = 2
         try:
-            speed = float(self.cm_speed_input.text())
+            speed = float(self.speed_input.text())
             for axis in all_axes:
                 self.axes_data[axis]['axis_obj'].enable()
                 self.axes_data[axis]["state"] = True
@@ -450,10 +495,9 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             print(f"Ошибка при включении осей или установке скорости: {e}")
         
         try:
-            radius = float(self.cm_radius_input.text())
-            rotation = str(self.cm_rotation_input.text())
-            angle = float(self.cm_angle_input.text())
-            N = int(self.cm_number_of_rounds_input.text())
+            radius = float(self.radius_input.text())
+            rotation = str(self.rotation_input.text())
+            N = int(self.number_of_rounds_input.text())
             self.dual_print(f"N: {N}, тип: {type(N)}")
         except Exception as e:
             self.dual_print(f"Ошибка чтения параметров кругового движения: {e}")
@@ -466,7 +510,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             self.dual_print("Успешное подключение к Keithley")
 
 
-        self.cm_worker = CircularMotionWorker(self.stand, nano, speed, radius, rotation, N, angle)
+        self.cm_worker = CircularMotionWorker(self.stand, nano, speed, radius, rotation, N)
         self.cm_worker.log_ready.connect(self.handle_cm_log)
         self.cm_worker.error_signal.connect(lambda msg: self.show_error(f"CM ошибка: {msg}"))
         self.cm_worker.progress_signal.connect(self.print_from_workers)
@@ -478,7 +522,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
     @pyqtSlot(dict)
     def handle_cm_log(self, log):
         self.cm_motion_log = log
-        fig1, fig2 = calc.harmonicAnalysis(log)
+        fig1, fig2 = calc.harmonicAnalysis(log, self.M)
 
         try:
             buf = io.BytesIO()
@@ -524,16 +568,16 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         
         #! МОЖНО СДЕЛАТЬ QDoubleValidator и автоматическую замену запятой на точку
         try:
-            distance = float(self.ffi_distance_input.text())
+            distance = float(self.distance_input.text())
         except ValueError:
             self.show_error("Ошибка: введите число через точку")
-            self.ffi_distance_input.setText('0.0')
+            self.distance_input.setText('0.0')
             distance = 0.0  # или другое значение по умолчанию
         else:
             self.dual_print(f"Дистанция успешно введена и установлена")
 
         try:
-            mode = (self.ffi_mode_input.text())
+            mode = (self.mode_input.text())
             if mode and distance != 0:
                 if mode == 'X':
                     ffi_axes = [1,3]
@@ -555,7 +599,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             self.dual_print(f"Мод успешно выбран")
 
         try:
-            speed = float(self.ffi_speed_input.text())
+            speed = float(self.speed_input.text())
             for axis in ffi_axes:  # Задаём скорость осям с поля ввода
                     self.axes_data[axis]['axis_obj'].set_speed(speed)
         except ValueError:
@@ -610,16 +654,16 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
         
         #! МОЖНО СДЕЛАТЬ QDoubleValidator и автоматическую замену запятой на точку
         try:
-            distance = float(self.sfi_distance_input.text())
+            distance = float(self.distance_input.text())
         except ValueError:
             self.show_error("Ошибка: введите число через точку")
-            self.sfi_distance_input.setText('0.0')
+            self.distance_input.setText('0.0')
             distance = 0.0  # или другое значение по умолчанию
         else:
             self.dual_print(f"Дистанция успешно введена и установлена")
 
         try:
-            mode = (self.sfi_mode_input.text())
+            mode = (self.mode_input.text())
             if mode and distance != 0:
                 if mode == 'X':
                     sfi_axes = [1,3]
@@ -641,7 +685,7 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             self.dual_print(f"Мод успешно выбран")
 
         try:
-            speed = float(self.sfi_speed_input.text())
+            speed = float(self.speed_input.text())
             for axis in sfi_axes:  # Задаём скорость осям с поля ввода
                     self.axes_data[axis]['axis_obj'].set_speed(speed)
         except ValueError:
@@ -722,55 +766,62 @@ class ACSControllerGUI(QMainWindow, Ui_MainWindow):
             return
 
         try:
-            distance = float(self.fma_distance_input.text())
-            speed = float(self.fma_speed_input.text())
+            # Используем поля ввода из вкладки "Выбор режимов движения"
+            distance = float(self.distance_input.text())
+            speed = float(self.speed_input.text())
         except ValueError:
-            self.dual_print("Ошибка: введите число через точку для дистанции/скорости.")
+            self.dual_print("Ошибка: введите корректные числовые значения для дистанции и скорости.")
             return
 
-        # Initialize Keithley if not already done (self.nano)
+        # Инициализация Keithley, если он еще не создан
+        # У вас уже есть подобный код в других методах, можно вынести в отдельную функцию
         if not hasattr(self, 'nano') or self.nano is None:
             try:
-                nano = ktl(resource="GPIB0::7::INSTR", mode='meas')
+                # Предполагается, что self.nano - это экземпляр класса Keithley
+                self.nano = ktl(resource="GPIB0::7::INSTR", mode='meas')
                 self.dual_print("Успешное подключение к Keithley для поиска оси.")
             except Exception as e:
                 self.dual_print(f"Ошибка подключения к Keithley: {e}")
                 return
 
-        CONVERGENCE_THRESHOLD = 0.005  # mm, example value, make it configurable if needed
-        MAX_ITERATIONS = 3             # Maximum number of iterations for convergence
+        # Параметры для алгоритма - их можно вынести в GUI, если нужна гибкость
+        CONVERGENCE_THRESHOLD = 0.005  # мм, порог сходимости
+        MAX_ITERATIONS = 5             # Максимальное количество итераций
 
         self.fma_worker = FindMagneticAxisWorker(
             self.stand,
-            nano,
+            self.nano,
             distance,
             speed,
             CONVERGENCE_THRESHOLD,
             MAX_ITERATIONS
         )
 
+        # Подключаем сигналы воркера к слотам в GUI
         self.fma_worker.progress_signal.connect(self.print_from_workers)
         self.fma_worker.error_signal.connect(self.handle_fma_error)
         self.fma_worker.finished_signal.connect(self.handle_fma_finished)
-
-        # Disable button, etc.
-        self.findMagAxes_button.setEnabled(False)
+        
+        # Деактивируем кнопку на время работы, чтобы избежать повторного запуска
+        self.findMagAxes_button.setEnabled(False) 
+        
         self.dual_print(f"Запуск поиска магнитной оси...")
-        self.fma_worker.start()
+        self.fma_worker.run()
 
     @pyqtSlot(str)
     def handle_fma_error(self, message):
-        self.show_error(f"Ошибка поиска магн. оси: {message}")
-        self.findMagAxes_button.setEnabled(True) # Re-enable button on error
+        """Обрабатывает сигнал об ошибке от воркера поиска оси."""
+        self.show_error(f"Ошибка поиска магнитной оси: {message}")
+        self.findMagAxes_button.setEnabled(True) # Включаем кнопку обратно
 
     @pyqtSlot(dict)
     def handle_fma_finished(self, final_positions):
+        """Обрабатывает сигнал об успешном завершении от воркера."""
         self.dual_print("Поиск магнитной оси завершен.")
-        # You can format and display final_positions as needed
-        # for axis_id, pos in final_positions.items():
-        #    self.dual_print(f"  {axis_id}: {pos:.4f} мм")
-        self.findMagAxes_button.setEnabled(True) # Re-enable button on finish
-
+        # Выводим финальные позиции в лог
+        for axis_id, pos in final_positions.items():
+            self.dual_print(f"  {axis_id}: {pos:.4f} мм")
+        self.findMagAxes_button.setEnabled(True) # Включаем кнопку обратно
 
     @pyqtSlot(str)
     def print_from_workers(self, message):

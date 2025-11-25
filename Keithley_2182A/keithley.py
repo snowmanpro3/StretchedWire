@@ -1,6 +1,10 @@
 import pyvisa
 import threading
 import time
+import re
+from typing import List
+
+FLOAT_RE = re.compile(r'[+-]?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?')
 
 class Keithley2182A:
     def __init__(self, resource: str = "GPIB0::7::INSTR", mode: str = "meas"):
@@ -10,17 +14,21 @@ class Keithley2182A:
         self.inst = self.rm.open_resource(resource)
         self.inst.timeout = 2000  # мс
 
+        # ----------- Инициализация -----------
         self.inst.write("*RST")
+        time.sleep(0.2)
         self.inst.write("*CLS")
-        self.inst.write(":SYST:AZER OFF")  # Выключить автообнуление (ускоряет)
-        self.inst.write(f":SENS:CHAN 2")
-        self.inst.write(":SENS:FUNC 'VOLT'")
-        self.inst.write(":VOLT:NPLC 0.01")  # Быстрое измерение
-        self.inst.write(":FORM:ELEM READ")  # Только значение
 
-        self.inst.write(":TRIG:SOUR IMM")   # Немедленный триггер
+        self.inst.write(":SYST:AZER OFF")
+        self.inst.write(":SENS:FUNC 'VOLT'")
+        self.inst.write(":VOLT:NPLC 0.01")
+        self.inst.write(":FORM:ELEM READ")
+
+        # ВНУТРЕННИЙ триггер + непрерывные измерения
+        self.inst.write(":TRIG:SOUR IMM")
         self.inst.write(":TRIG:COUNT INF")
         self.inst.write(":INIT:CONT ON")
+        self.inst.write(":INIT")
 
     def get_voltage(self) -> float:
         """
@@ -33,11 +41,33 @@ class Keithley2182A:
         except Exception as e:
             print(f"[!] Ошибка при получении ЭДС: {e}")
             return float("nan")
+        
+
+    def get_voltage(self) -> float:
+        """
+        Получает значение ЭДС:
+        - В режиме 'fetch' — читает последнее готовое измерение
+        - В режиме 'meas'  — ЧТО ДЕЛАТЬ НЕЛЬЗЯ: запускать новое измерение
+        **НО** так как мы используем internal trigger, мы ВСЕГДА читаем FETC?
+        """
+        try:
+            raw = self.inst.query(":FETC?")
+            m = FLOAT_RE.search(raw)
+            return float(m.group()) if m else float("nan") #! group() вернет строку с числом
+        except Exception as e:
+            print(f"[!] Ошибка при получении ЭДС: {e}")
+            return float("nan")
 
     def close(self):
-        """Закрывает соединение с вольтметром"""
-        self.keithley.close()
-        self.rm.close()
+        """Закрывает соединение с вольтметром (исправлено)"""
+        try:
+            self.inst.close()
+        except:
+            pass
+        try:
+            self.rm.close()
+        except:
+            pass
 
 
 
@@ -46,49 +76,46 @@ class Keithley2182A:
 
     def keithley2182A():
         try:
-            # Создаем менеджер ресурсов VISA
             rm = pyvisa.ResourceManager()
-            print(rm.list_resources())  #! Выведет список доступных приборов
-            
-            # Пытаемся подключиться к Keithley 2182A (адрес GPIB обычно 7)
+            print(rm.list_resources())
+
             keithley = rm.open_resource("GPIB0::7::INSTR")
-            
-            keithley.timeout = 3000  # Устанавливаем таймаут для запроса (в миллисекундах)
-            
-            response = keithley.query("*IDN?") # Отправляем команду идентификации
-            
-            voltage = keithley.query(":READ?") # Чтение текущего измерения
+            keithley.timeout = 3000
+
+            response = keithley.query("*IDN?")
+            voltage = keithley.query(":READ?")
             print(f"Текущее напряжение: {voltage} В")
-            # Закрываем соединение
             keithley.close()
-            
-            # Проверяем ответ
+
             if "KEITHLEY INSTRUMENTS INC.,MODEL 2182A" in response:
                 print(f"Успешное подключение! Ответ прибора:\n{response}")
                 return True
             else:
                 print(f"Подключено неизвестное устройство. Ответ:\n{response}")
                 return False
-                
+
         except pyvisa.errors.VisaIOError as e:
             print(f"Ошибка подключения: {e}")
             return False
         except Exception as e:
             print(f"Неожиданная ошибка: {e}")
             return False
+    # ------------------------------------------------------------------------------------
+
 
 if __name__ == '__main__':
     nano = Keithley2182A(resource="GPIB0::7::INSTR", mode='meas')
-    # print(k.keithley.supports_event())  # должно быть True (проверка поддержки SRQ)
+
     start_time = time.time()
-    poll_interval = 0.05
+    poll_interval = 0.01
     pos_log = []
     N = 0
-    while N < 15:
-        eds = nano.get_voltage()                                # Получем ЭДС с keithley
-        print(eds, time.time() - start_time)
+
+    while N < 150:
+        eds = nano.get_voltage()
+        print(N, eds, time.time() - start_time)
         N += 1
-        time.sleep(poll_interval)                                    # Пауза между опросами
+        time.sleep(poll_interval)
 
 
 
