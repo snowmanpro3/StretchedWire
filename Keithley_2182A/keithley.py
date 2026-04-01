@@ -19,9 +19,12 @@ class Keithley2182A:
         time.sleep(0.2)
         self.inst.write("*CLS")
 
+        self.inst.write(f":SENS:CHAN 2")
         self.inst.write(":SYST:AZER OFF")
-        self.inst.write(":SENS:FUNC 'VOLT'")
-        self.inst.write(":VOLT:NPLC 0.01")
+        self.inst.write(":SENS:FUNC 'VOLT:DC'")
+        # self.inst.write(":SENS:VOLT:CHAN2:LPAS:STAT ON")
+        # self.inst.write(":SENS:VOLT:CHAN2:DFIL:WIND 0.01")
+        self.inst.write(":VOLT:NPLC 1")
         self.inst.write(":FORM:ELEM READ")
 
         # ВНУТРЕННИЙ триггер + непрерывные измерения
@@ -43,7 +46,7 @@ class Keithley2182A:
             return float("nan")
         
 
-    def get_voltage(self) -> float:
+    def get_voltage(self) -> float:  #! почему две одинаковые функции
         """
         Получает значение ЭДС:
         - В режиме 'fetch' — читает последнее готовое измерение

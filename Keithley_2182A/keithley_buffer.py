@@ -18,6 +18,7 @@ class Keithley2182A:
         self._write("*CLS")
 
         self._write(":SYST:AZER OFF")
+        self._write(":SENS:CHAN 2")
         self._write(":SENS:FUNC 'VOLT'")
         self._write(":VOLT:NPLC 0.01")
         self._write(":FORM:ELEM READ")
@@ -56,7 +57,7 @@ class Keithley2182A:
 # ---------------------- ТЕСТ ЗА 20 ТОЧЕК ----------------------
 if __name__ == "__main__":
     RESOURCE = "GPIB0::7::INSTR"
-    N = 1100     # сколько измерений сделать
+    N = 100     # сколько измерений сделать
 
     dev = Keithley2182A(resource=RESOURCE)
 

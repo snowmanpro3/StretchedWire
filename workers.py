@@ -524,3 +524,139 @@ class FindMagneticAxisWorker(QThread):
     def stop(self):
         self.running = False
         self.progress_signal.emit("Получен сигнал остановки...")
+
+
+
+
+class MagAxisWorker_like_CM(QThread):
+    progress_signal = pyqtSignal(str)
+    error_signal = pyqtSignal(str)
+    log_ready = pyqtSignal(dict)
+    pos_new = pyqtSignal(float)
+
+    def __init__(self, stand, keithley, speed, radius, rotation, N, first_second_type):
+        super().__init__()
+        self.stand = stand
+        self.keithley = keithley
+        self.speed = speed
+        self.radius = radius  #! Для поиска магнитной оси радиус должен рассчитаться из размеров апертуры и области поиска мб
+        self.rotation = rotation
+        self.N = N #!!! Количество оборотов. Учесть в задании сегментов
+        self.running = True
+        self.masters = [0, 1]
+        self.all_axes = [0, 1, 2, 3]
+
+    def run(self):
+        print(f"N: {self.N}, тип: {type(self.N)}")
+        #* ПРЕДПОЛАГАЕТСЯ ЧТО НИТЬ НАХОДИТСЯ В ЦЕНТРЕ, Т.Е. НА МАГНИТНОЙ ОСИ
+        try:
+            #! Создаём две пары мастер слейв. Далее управляем только осями 0 и 1. 2 и 3 повторяют их движение"
+            program_0 = f"""
+            MFLAGS(2).#DEFCON = 0
+            CONNECT RPOS(2) = APOS(0)
+            DEPENDS 2, 0
+            MFLAGS(3).#DEFCON = 0
+            CONNECT RPOS(3) = APOS(1)
+            DEPENDS 3, 1
+            GROUP (0,1,2,3)
+            """
+
+            acsc.cleanBuffer(self.stand.hc, 0)
+            acsc.loadBuffer(self.stand.hc, 0, program_0)
+            acsc.compileBuffer(self.stand.hc, 0)
+            acsc.runBuffer(self.stand.hc, 0)
+
+        except Exception as e:
+            self.progress_signal.emit(f"Ошибка при создании master-slave пар: {e}")
+            print(f"Ошибка при создании master-slave пар: {e}")
+        else:
+            self.progress_signal.emit(f"master-slave пары успешно созданы")
+            print(f"master-slave пары успешно созданы")
+
+        try:
+            acsc.toPoint(self.stand.hc, acsc.AMF_RELATIVE, 1, -self.radius, acsc.SYNCHRONOUS)
+            acsc.waitMotionEnd(self.stand.hc, 1, 20000)
+        except Exception as e:
+            self.progress_signal.emit(f"Ошибка при запуске выводе нити на старт (acsc.toPoint): {e}")
+            print(f"Ошибка при запуске выводе нити на старт (toPoint): {e}")
+        else:
+            self.progress_signal.emit(f"Функция acsc.toPoint выполнена без ошибок, нить выведена на старт")
+            print(f"Функция acsc.toPoint выполнена без ошибок, нить выведена на старт")
+
+
+        try:
+            program_1 = f"""
+            MSEG (0,1),{0},{-self.radius} 
+            """
+
+
+            acsc.cleanBuffer(self.stand.hc, 1)
+            acsc.loadBuffer(self.stand.hc, 1, program_1)
+
+            program_2 = f"""
+            ARC1 (0,1), {0},{0},{0},{self.radius},{self.rotation} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
+            ARC1 (0,1), {0},{0},{0},{-self.radius},{self.rotation}
+            """
+            
+            for _ in range(self.N - 1):
+                acsc.appendBuffer(self.stand.hc, 1, program_2)
+
+            program_3 = f"""
+            ARC1 (0,1), {0},{0},{0},{self.radius},{self.rotation} ! Add arc segment with center(1,0), final point (1,-1, clockwise rotation.
+            ARC1 (0,1), {0},{0},{0},{-self.radius},{self.rotation}
+            ENDS (0,1)
+            SPLITALL
+            STOP
+            """
+
+            acsc.appendBuffer(self.stand.hc, 1, program_3)
+            acsc.compileBuffer(self.stand.hc, 1)
+            acsc.runBuffer(self.stand.hc, 1)
+
+        except Exception as e:
+            self.progress_signal.emit(f"Ошибка при запуске движения по окружности: {e}")
+            print(f"шибка при запуске движения по окружности: {e}")
+        else:
+            self.progress_signal.emit(f"Гармонический анализ успешно запущен, идёт измерение...")
+            print(f"Гармонический анализ успешно запущен, идёт измерение...")
+
+        
+        try:
+            # master = self.ffi_axes[0]
+            log = {
+                'time': [],
+                'x_pos': [],
+                'y_pos': [],
+                'eds': [],
+            }
+            start_time = time.time()
+            while self.running:
+                eds = self.keithley.get_voltage()
+                x_pos = acsc.getFPosition(self.stand.hc, self.masters[1])
+                y_pos = acsc.getFPosition(self.stand.hc, self.masters[0])
+                log['eds'].append(eds)
+                log['time'].append(time.time() - start_time)
+                log['x_pos'].append(x_pos)
+                log['y_pos'].append(y_pos)
+
+                mot_state = acsc.getMotorState(self.stand.hc, self.masters[0])
+                if mot_state['in position']:
+                    break
+                time.sleep(0.01)
+            self.log_ready.emit(log)
+        except Exception as e:
+            self.error.emit(str(e))
+
+        try:
+            acsc.toPoint(self.stand.hc, acsc.AMF_RELATIVE, 1, self.radius, acsc.SYNCHRONOUS)
+            acsc.waitMotionEnd(self.stand.hc, 1, 20000)
+        except Exception as e:
+            self.progress_signal.emit(f"Ошибка при возвращении нити в центр (acsc.toPoint): {e}")
+            print(f"Ошибка при возвращении нити в центр (toPoint): {e}")
+        else:
+            self.progress_signal.emit(f"Функция acsc.toPoint выполнена без ошибок, нить возвращена в центр")
+            print(f"Функция acsc.toPoint выполнена без ошибок, нить возвращена в центр")
+
+    def stop(self):
+        self.running = False
+        self.progress_signal.emit("Получен сигнал остановки...")
